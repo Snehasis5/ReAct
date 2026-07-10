@@ -58,9 +58,14 @@ PLANNER"""
 
 REASONER_SYSTEM_PROMPT = f"""You are REASONER, the ReAct reasoning module of an autonomous coding agent. \
 Given the goal, the plan, working memory, and the current step, produce ONE visible reasoning thought \
-and exactly ONE tool call to make progress on the current step. Return ONLY JSON:
+and exactly ONE tool call to make progress on the current step.
 
-{{"thought": "...", "tool_name": "...", "tool_input": {{...}}}}
+Your ENTIRE response must be a single JSON object and nothing else - no prose before or after it, no \
+markdown code fences, and critically: do NOT write the tool call as a Python-style function call like \
+`write_file(filename="x.py", content="...")`. That is WRONG. The tool call belongs INSIDE the JSON, as \
+the "tool_name" and "tool_input" fields, exactly like this shape:
+
+{{"thought": "...", "tool_name": "write_file", "tool_input": {{"filename": "x.py", "content": "..."}}}}
 
 Available tools:
 {tool_catalog_text()}

@@ -32,13 +32,21 @@ def extract_json(text: str) -> dict:
     text = text.strip()
     fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     if fenced:
-        text = fenced.group(1)
+        candidate = fenced.group(1)
     else:
         brace_start = text.find("{")
         brace_end = text.rfind("}")
-        if brace_start != -1 and brace_end != -1 and brace_end > brace_start:
-            text = text[brace_start:brace_end + 1]
-    return json.loads(text)
+        candidate = text[brace_start:brace_end + 1] if (brace_start != -1 and brace_end != -1 and brace_end > brace_start) else text
+    return json.loads(candidate)
+
+
+REPAIR_INSTRUCTION = (
+    "Your previous response was not valid JSON - it looked like prose, markdown, or "
+    "a Python-style function call (e.g. `write_file(filename=..., content=...)`) instead "
+    "of the required JSON object. Convert your PREVIOUS answer into ONLY a single valid "
+    "JSON object matching the schema you were given. Output the JSON object and nothing "
+    "else - no explanation, no code fences, no function-call syntax."
+)
 
 
 class LiveLLMClient:
@@ -69,12 +77,33 @@ class LiveLLMClient:
                 on_token(delta)
         return "".join(full)
 
-    def chat_json(self, messages: list[Message], temperature: float = 0.0) -> dict:
-        text = self.chat(messages, temperature=temperature)
-        try:
-            return extract_json(text)
-        except Exception as e:
-            raise ValueError(f"LLM did not return valid JSON. Raw output: {text!r}") from e
+    def chat_json(self, messages: list[Message], temperature: float = 0.0, max_repair_attempts: int = 2) -> dict:
+        working_messages = list(messages)
+        last_text = ""
+        last_error: Optional[Exception] = None
+
+        for attempt in range(max_repair_attempts + 1):
+            text = self.chat(working_messages, temperature=temperature)
+            last_text = text
+            try:
+                return extract_json(text)
+            except Exception as e:  # noqa: BLE001
+                last_error = e
+                if attempt < max_repair_attempts:
+                    # Give the model its own bad output back and ask it to fix the
+                    # format - this recovers from models (especially small/free ones)
+                    # that ignore "return only JSON" and instead write prose or
+                    # pseudo-function-call syntax.
+                    working_messages = working_messages + [
+                        {"role": "assistant", "content": text},
+                        {"role": "user", "content": REPAIR_INSTRUCTION},
+                    ]
+                    continue
+
+        raise ValueError(
+            f"LLM did not return valid JSON after {max_repair_attempts + 1} attempt(s). "
+            f"Raw output: {last_text!r}"
+        ) from last_error
 
 
 class MockLLMClient:
