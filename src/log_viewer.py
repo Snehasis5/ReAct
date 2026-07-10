@@ -9,6 +9,7 @@ print_run_log_table() -> CLI viewer using `rich`, for `python -m src.log_viewer 
 """
 from __future__ import annotations
 
+import html
 import json
 import sys
 from pathlib import Path
@@ -96,15 +97,20 @@ _HTML_TEMPLATE = """<!doctype html>
   .meta {{ color:#9aa0a6; margin-bottom:20px; }}
   .step {{ border:1px solid #2a2d34; border-radius:10px; padding:14px 16px; margin-bottom:14px; background:#161923; }}
   .step-header {{ font-weight:600; color:#8ab4f8; margin-bottom:8px; }}
-  .thought {{ color:#f4d35e; margin-bottom:6px; }}
-  .action {{ font-family:monospace; background:#0b0d12; padding:6px 8px; border-radius:6px; margin-bottom:6px; white-space:pre-wrap; }}
-  .observation {{ color:#c9c9c9; white-space:pre-wrap; margin-bottom:6px; }}
+  .thought {{ color:#f4d35e; margin-bottom:8px; white-space:pre-wrap; }}
+  .action-line {{ font-family:monospace; font-size:13px; margin-bottom:6px; }}
+  .tool-name {{ color:#8ab4f8; font-weight:600; }}
+  .param-chip {{ font-family:monospace; font-size:11.5px; background:#1c202c; color:#b8bcc8; padding:2px 8px; border-radius:6px; margin-left:6px; }}
+  .block-label {{ font-size:11px; color:#9aa0a6; margin:8px 0 4px; text-transform:uppercase; letter-spacing:.04em; }}
+  .code-block {{ font-family:monospace; font-size:12.5px; line-height:1.5; background:#0b0d12; padding:10px 12px; border-radius:8px; white-space:pre-wrap; word-break:break-word; color:#d3d6de; overflow-x:auto; margin-bottom:6px; }}
+  .error-block {{ font-family:monospace; font-size:12.5px; background:#241212; border:1px solid #4a2020; color:#ff9b9b; padding:10px 12px; border-radius:8px; white-space:pre-wrap; word-break:break-word; margin-bottom:6px; }}
+  .stat-pill {{ display:inline-block; font-size:11.5px; padding:3px 9px; border-radius:12px; background:#1c202c; color:#b8bcc8; margin-right:6px; }}
   .badge {{ display:inline-block; padding:2px 8px; border-radius:10px; font-size:12px; margin-right:6px; }}
   .ok {{ background:#1e3a2a; color:#7ee787; }}
   .fail {{ background:#3a1e1e; color:#ff9b9b; }}
   .eval {{ background:#241f33; color:#c3a6ff; padding:6px 8px; border-radius:6px; margin-bottom:6px; }}
   .recovery {{ background:#332a1f; color:#ffcf86; padding:6px 8px; border-radius:6px; }}
-  .final {{ border:1px solid #2a2d34; border-radius:10px; padding:16px; background:#12241a; margin-top:20px; }}
+  .final {{ border:1px solid #2a2d34; border-radius:10px; padding:16px; background:#12241a; margin-top:20px; white-space:pre-wrap; }}
   .unresolved {{ border:1px solid #4a2020; border-radius:10px; padding:16px; background:#241212; margin-top:12px; }}
 </style>
 </head>
@@ -123,50 +129,96 @@ _HTML_TEMPLATE = """<!doctype html>
 </html>
 """
 
+_CODE_LIKE_KEYS = ("content",)
+_TEXT_BLOCK_KEYS = ("stdout", "stderr", "content")
+_STAT_KEYS = ("exit_code", "passed", "failed", "bytes_written")
+
+
+def _action_html(action) -> str:
+    if action is None:
+        return "-"
+    scalar_bits = "".join(
+        f'<span class="param-chip">{html.escape(str(k))}: {html.escape(str(v))}</span>'
+        for k, v in (action.tool_input or {}).items() if k not in _CODE_LIKE_KEYS
+    )
+    parts = [f'<div class="action-line"><span class="tool-name">▶ {html.escape(action.tool_name)}</span>{scalar_bits}</div>']
+    for key in _CODE_LIKE_KEYS:
+        val = (action.tool_input or {}).get(key)
+        if val is not None:
+            parts.append(f'<div class="block-label">{key}</div><pre class="code-block">{html.escape(str(val))}</pre>')
+    return "".join(parts)
+
+
+def _observation_html(tool_result) -> str:
+    if tool_result is None:
+        return ""
+    if not tool_result.success:
+        return f'<div class="error-block">{html.escape(tool_result.error or "Unknown error")}</div>'
+    output = tool_result.output or {}
+    parts = []
+    stat_bits = "".join(
+        f'<span class="stat-pill">{html.escape(k)}: {html.escape(str(output[k]))}</span>'
+        for k in _STAT_KEYS if k in output
+    )
+    if stat_bits:
+        parts.append(f'<div>{stat_bits}</div>')
+    if output.get("path"):
+        parts.append(f'<div class="code-block">{html.escape(str(output["path"]))}</div>')
+    for key in _TEXT_BLOCK_KEYS:
+        val = output.get(key)
+        if val:
+            parts.append(f'<div class="block-label">{key}</div><pre class="code-block">{html.escape(str(val))}</pre>')
+    handled = set(_STAT_KEYS) | set(_TEXT_BLOCK_KEYS) | {"path"}
+    rest_bits = "".join(
+        f'<span class="stat-pill">{html.escape(k)}: {html.escape(str(v))}</span>'
+        for k, v in output.items() if k not in handled
+    )
+    if rest_bits:
+        parts.append(f'<div>{rest_bits}</div>')
+    return "".join(parts)
+
 
 def render_run_log_html(run_log: RunLog) -> str:
     steps_html = []
     for s in run_log.steps:
         action = s.reasoning.action
-        action_str = f"{action.tool_name}({action.tool_input})" if action else "-"
         ok = s.tool_result.success if s.tool_result else False
         badge = f'<span class="badge {"ok" if ok else "fail"}">{"success" if ok else "failed"}</span>'
         eval_html = ""
         if s.self_evaluation:
             e = s.self_evaluation
             eval_html = (
-                f'<div class="eval">self-eval: failure_mode={e.failure_mode.value}, '
-                f'on_track={e.still_on_track}, confidence={e.confidence:.2f}<br>{e.rationale}</div>'
+                f'<div class="eval">self-eval: failure_mode={html.escape(e.failure_mode.value)}, '
+                f'on_track={e.still_on_track}, confidence={e.confidence:.2f}<br>{html.escape(e.rationale)}</div>'
             )
         recovery_html = ""
         if s.recovery:
             r = s.recovery
-            recovery_html = f'<div class="recovery">recovery: {r.strategy.value}<br>{r.rationale}</div>'
-        obs = (s.tool_result.output if ok else s.tool_result.error) if s.tool_result else ""
+            recovery_html = f'<div class="recovery">recovery: {html.escape(r.strategy.value)}<br>{html.escape(r.rationale)}</div>'
         steps_html.append(f"""
         <div class="step">
-          <div class="step-header">Step {s.step_id} {badge}</div>
-          <div class="thought">💭 {s.reasoning.thought}</div>
-          <div class="action">▶ {action_str}</div>
-          <div class="observation">{obs}</div>
+          <div class="step-header">Step {html.escape(s.step_id)} {badge}</div>
+          <div class="thought">💭 {html.escape(s.reasoning.thought)}</div>
+          {_action_html(action)}
+          {_observation_html(s.tool_result)}
           {eval_html}
           {recovery_html}
         </div>""")
 
     unresolved_html = ""
     if run_log.unresolved_subtasks:
-        unresolved_html = f'<div class="unresolved"><b>Unresolved Subtasks</b><br>{", ".join(run_log.unresolved_subtasks)}</div>'
+        unresolved_html = f'<div class="unresolved"><b>Unresolved Subtasks</b><br>{html.escape(", ".join(run_log.unresolved_subtasks))}</div>'
 
     return _HTML_TEMPLATE.format(
-        run_id=run_log.run_id,
-        goal=run_log.goal,
+        run_id=html.escape(run_log.run_id),
+        goal=html.escape(run_log.goal),
         self_correction_enabled=run_log.self_correction_enabled,
         completed=run_log.completed,
         self_corrections=run_log.self_corrections,
         n_unresolved=len(run_log.unresolved_subtasks),
         duration=run_log.duration_seconds(),
         steps_html="".join(steps_html),
-        final_output=run_log.final_output or "",
+        final_output=html.escape(run_log.final_output or ""),
         unresolved_html=unresolved_html,
     )
 
