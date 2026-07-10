@@ -1,0 +1,180 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Heva Agent Playground</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #161923; --border: #262a35; --text: #e7e9ee;
+    --muted: #8b90a0; --accent: #7aa2f7; --ok: #7ee787; --fail: #ff9b9b;
+    --thought: #f4d35e; --eval: #c3a6ff; --recover: #ffcf86;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background:var(--bg); color:var(--text); }
+  .layout { display:flex; height:100vh; }
+  .sidebar { width:280px; border-right:1px solid var(--border); padding:16px; overflow-y:auto; }
+  .sidebar h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:0 0 10px; }
+  .run-item { padding:8px 10px; border-radius:8px; font-size:13px; margin-bottom:6px; cursor:pointer; border:1px solid var(--border); }
+  .run-item:hover { background:var(--panel); }
+  .main { flex:1; display:flex; flex-direction:column; min-width:0; }
+  .header { padding:16px 24px; border-bottom:1px solid var(--border); }
+  .header h1 { font-size:16px; margin:0 0 4px; }
+  .header p { font-size:13px; color:var(--muted); margin:0; }
+  .trace { flex:1; overflow-y:auto; padding:20px 24px; }
+  .composer { border-top:1px solid var(--border); padding:14px 24px; display:flex; gap:10px; align-items:center; }
+  .composer input[type=text] { flex:1; background:var(--panel); border:1px solid var(--border); color:var(--text); padding:10px 12px; border-radius:8px; font-size:14px; }
+  .composer button { background:var(--accent); color:#0f1115; border:none; padding:10px 16px; border-radius:8px; font-weight:600; cursor:pointer; font-size:14px; }
+  .composer button:disabled { opacity:.5; cursor:not-allowed; }
+  .toggle { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); }
+  .card { border:1px solid var(--border); border-radius:10px; padding:12px 14px; margin-bottom:12px; background:var(--panel); }
+  .card .head { font-size:12px; color:var(--muted); margin-bottom:6px; display:flex; justify-content:space-between; }
+  .thought { color:var(--thought); }
+  .action code, .obs pre { font-family: ui-monospace, monospace; font-size:12.5px; background:#0b0d12; padding:8px 10px; border-radius:6px; display:block; white-space:pre-wrap; word-break:break-word; }
+  .badge { display:inline-block; padding:1px 8px; border-radius:10px; font-size:11px; margin-left:6px; }
+  .badge.ok { background:#1e3a2a; color:var(--ok); }
+  .badge.fail { background:#3a1e1e; color:var(--fail); }
+  .eval { border-left:3px solid var(--eval); padding-left:10px; margin-top:8px; font-size:13px; color:#d8c9ff; }
+  .recovery { border-left:3px solid var(--recover); padding-left:10px; margin-top:8px; font-size:13px; color:#ffe0ab; }
+  .plan-box { border:1px dashed var(--border); border-radius:10px; padding:12px 14px; margin-bottom:16px; font-size:13px; }
+  .plan-box li { margin-bottom:4px; color:var(--muted); }
+  .final-box { border:1px solid #2a4a33; background:#12241a; border-radius:10px; padding:14px; margin-top:10px; }
+  .empty { color:var(--muted); font-size:14px; padding:40px 0; text-align:center; }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="layout">
+  <div class="sidebar">
+    <h2>Past runs</h2>
+    <div id="runList"></div>
+  </div>
+  <div class="main">
+    <div class="header">
+      <h1>Self-correcting agent playground</h1>
+      <p>Give it a coding goal. Watch it plan, act, judge itself, and recover from failures — live.</p>
+    </div>
+    <div class="trace" id="trace">
+      <div class="empty">No run yet. Try: "Write a function that checks if a string is a palindrome, with tests."</div>
+    </div>
+    <div class="composer">
+      <label class="toggle"><input type="checkbox" id="selfCorrect" checked> self-correction</label>
+      <input type="text" id="goalInput" placeholder="Describe a coding goal for the agent…">
+      <button id="runBtn">Run</button>
+    </div>
+  </div>
+</div>
+<script>
+const traceEl = document.getElementById('trace');
+const runBtn = document.getElementById('runBtn');
+const goalInput = document.getElementById('goalInput');
+const selfCorrect = document.getElementById('selfCorrect');
+const runList = document.getElementById('runList');
+
+function el(html) {
+  const d = document.createElement('div');
+  d.innerHTML = html.trim();
+  return d.firstChild;
+}
+
+function stepCard(stepId) {
+  let card = document.getElementById('step-' + stepId + '-' + Date.now());
+  return card;
+}
+
+async function loadRuns() {
+  const res = await fetch('/api/logs');
+  const runs = await res.json();
+  runList.innerHTML = '';
+  for (const r of runs) {
+    const item = el(`<div class="run-item">
+      <div>${r.goal.slice(0,40)}${r.goal.length>40?'…':''}</div>
+      <div style="color:var(--muted); font-size:11px; margin-top:3px;">
+        ${r.self_correction_enabled ? 'self-correct' : 'baseline'} ·
+        ${r.completed ? '<span style="color:var(--ok)">done</span>' : '<span style="color:var(--fail)">incomplete</span>'} ·
+        ${r.self_corrections} corrections
+      </div>
+    </div>`);
+    item.onclick = () => window.open('/logs/' + r.run_id, '_blank');
+    runList.appendChild(item);
+  }
+}
+loadRuns();
+
+function addCard(html) {
+  const c = el(html);
+  traceEl.appendChild(c);
+  traceEl.scrollTop = traceEl.scrollHeight;
+  return c;
+}
+
+runBtn.onclick = () => {
+  const goal = goalInput.value.trim();
+  if (!goal) return;
+  traceEl.innerHTML = '';
+  runBtn.disabled = true;
+  goalInput.disabled = true;
+
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws/run`);
+  const cardsByStep = {};
+
+  ws.onopen = () => ws.send(JSON.stringify({ goal, self_correction: selfCorrect.checked }));
+
+  ws.onmessage = (msg) => {
+    const ev = JSON.parse(msg.data);
+    if (ev.type === 'plan_created') {
+      const items = ev.plan.steps.map(s => `<li><b>${s.id}</b>: ${s.description}</li>`).join('');
+      addCard(`<div class="plan-box"><b>Plan</b><ul>${items}</ul></div>`);
+    } else if (ev.type === 'thought') {
+      const card = addCard(`<div class="card">
+        <div class="head"><span>step ${ev.step_id}${ev.regenerated ? ' (regenerated)' : ''}</span></div>
+        <div class="thought">💭 ${ev.thought}</div>
+      </div>`);
+      cardsByStep[ev.step_id + (ev.regenerated ? 'r' : '')] = card;
+    } else if (ev.type === 'action') {
+      const key = ev.step_id + (ev.regenerated ? 'r' : '');
+      const c = cardsByStep[key];
+      if (c) c.appendChild(el(`<div class="action"><code>▶ ${ev.action.tool_name}(${JSON.stringify(ev.action.tool_input)})</code></div>`));
+    } else if (ev.type === 'observation') {
+      const key = ev.step_id + (ev.regenerated ? 'r' : '');
+      const c = cardsByStep[key];
+      const ok = ev.tool_result.success;
+      const badge = `<span class="badge ${ok ? 'ok' : 'fail'}">${ok ? 'success' : 'failed'}</span>`;
+      const body = ok ? JSON.stringify(ev.tool_result.output) : ev.tool_result.error;
+      if (c) {
+        c.querySelector('.head').innerHTML += badge;
+        c.appendChild(el(`<div class="obs"><pre>${body}</pre></div>`));
+      }
+    } else if (ev.type === 'self_evaluation') {
+      const key = ev.step_id + (ev.regenerated ? 'r' : '');
+      const c = cardsByStep[key];
+      const e = ev.evaluation;
+      if (c) c.appendChild(el(`<div class="eval">self-eval: <b>${e.failure_mode}</b> (confidence ${e.confidence.toFixed(2)})<br>${e.rationale}</div>`));
+    } else if (ev.type === 'recovery') {
+      const c = cardsByStep[ev.step_id];
+      const r = ev.recovery;
+      if (c) c.appendChild(el(`<div class="recovery">recovery: <b>${r.strategy}</b><br>${r.rationale}</div>`));
+    } else if (ev.type === 'replan') {
+      const items = ev.new_steps.map(s => `<li><b>${s.id}</b>: ${s.description}</li>`).join('');
+      addCard(`<div class="plan-box"><b>Replanned remaining steps</b><ul>${items}</ul></div>`);
+    } else if (ev.type === 'step_abandoned') {
+      addCard(`<div class="card"><span class="badge fail">abandoned</span> step ${ev.step_id}: ${ev.reason}</div>`);
+    } else if (ev.type === 'final') {
+      addCard(`<div class="final-box"><b>Final output</b><br>${ev.final_output}<br><br>
+        <a href="/logs/${ev.run_id}" target="_blank">View full structured log ↗</a></div>`);
+    } else if (ev.type === 'error') {
+      addCard(`<div class="card"><span class="badge fail">error</span> ${ev.message}</div>`);
+    }
+  };
+
+  ws.onclose = () => {
+    runBtn.disabled = false;
+    goalInput.disabled = false;
+    loadRuns();
+  };
+};
+
+goalInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') runBtn.click(); });
+</script>
+</body>
+</html>
