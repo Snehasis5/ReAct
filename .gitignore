@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+sandbox_workspace/*
+!sandbox_workspace/.gitkeep
+.env.local
+*.egg-info/

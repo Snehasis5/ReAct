@@ -1,0 +1,18 @@
+[project]
+name = "heva-agent"
+version = "0.1.0"
+description = "Self-correcting multi-step ReAct agent for code generation & execution, with a live-trace chat playground."
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.6",
+    "openai>=1.30",
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "python-dotenv>=1.0",
+    "rich>=13.7",
+    "pytest>=8.0",
+    "jinja2>=3.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
