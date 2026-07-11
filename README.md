@@ -82,7 +82,7 @@ malformed schema, a missing file, a timeout, or a crashing subprocess all come b
 `ToolResult(success=False, error=...)` rather than crashing the agent loop.
 
 
-![ReAct Agent](ReAct Agent.png)
+![ReAct Agent](assets/ReAct_Agent.png)
 
 
 ## Self-correction mechanism
