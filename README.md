@@ -1,4 +1,4 @@
-# Heva Agent — Self-Correcting Multi-Step Coding Agent
+# Self-Correcting Multi-Step Coding Agent
 
 A hand-rolled ReAct agent (no LangChain/LlamaIndex/AutoGen/CrewAI) that writes code,
 executes it in a real subprocess sandbox, judges its own results with an independent
