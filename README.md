@@ -194,3 +194,4 @@ Two viewers, sharing the same renderer:
   but no resource limits (memory/CPU) or network isolation beyond the container's own
   egress rules: fine for this assignment's scope, not fine for untrusted input in
   production.
+*Note on scope and capability: The logs and transcripts were generated from small open-weight models, which have far lower instruction-following capabilities than frontier models (e.g., Claude Sonnet or GPT-5 Nano). The current evaluation is limited by available resources and inference costs.*
