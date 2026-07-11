@@ -142,7 +142,7 @@ and recovery decision, in order, so the whole decision chain that produced the a
 inspectable, not just the answer itself. The sidebar links back to every past run's log
 in the same format.
 
-**Demo:** [`demo.mp4`](https://drive.google.com/file/d/125d8uFMdlrKttRgt0HpCTQDl6Kn8mDII/view?usp=sharing)
+**Demo:** [![Watch the demo](https://img.youtube.com/vi/fIxCKuV5Ipw/maxresdefault.jpg)](https://youtu.be/fIxCKuV5Ipw)
 
 Watch the agent build another self-correcting ReAct coding agent from scratch, live, using a real LLM end-to-end. Since every step involves model inference, there is noticeable latency between actions. **Watching at 2× speed (or faster) is recommended.**
 
