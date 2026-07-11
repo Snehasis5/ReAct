@@ -151,33 +151,6 @@ self-correcting agent hit the same flaky failures (6 total tool_failure correcti
 across the 10 self-correcting runs) but recovered every time via `retry_with_backoff`
 and reached 100% completion.
 
-### Three self-correction traces (full detail in `logs/`)
-
-- **`logs/36afe6434bc4.json`** — goal: palindrome checker. Step `s5`
-  (`flaky_read_report`) raised `ConnectionError`, Monitor classified it `tool_failure`
-  with confidence 0.95, recovery `retry_with_backoff` fired twice before the tool
-  succeeded on retry. `self_corrections: 2`, `completed: true`.
-- **`logs/4e6100f9f702.json`** — goal: sentence-word-reversal. Same `s5` flaky-tool
-  failure pattern, one retry needed. `self_corrections: 1`, `completed: true`.
-- **`logs/d1c020d5fda4.json`** — goal: dedupe-preserving-order. Two flaky-tool failures
-  on `s5` before success. `self_corrections: 2`, `completed: true`.
-
-Compare against **`logs/f65e881c6341.json`** (baseline, word-frequency goal): the same
-flaky failure occurs on `s5`, but with no monitor/recovery the step is just marked
-`unresolvable` and the run ends `completed: false` with `unresolved_subtasks: ["s5"]`.
-
-### Honesty about limits
-
-The `result_inconsistency` and `goal_drift` recovery paths are exercised and unit-tested
-(`tests/test_monitor.py` verifies the failure-mode → strategy mapping directly), but the
-10-goal evaluation set happens to only surface `tool_failure` from the flaky tool in this
-particular run — the mock LLM's deterministic judge only flags `result_inconsistency`
-when pytest actually reports failures, which none of these 10 well-specified goals
-triggered. A live run with a real model on more ambiguous or larger goals would be
-expected to surface `result_inconsistency` (wrong-but-plausible code) more often; that
-path is real, tested, and wired into the same loop, just not naturally hit by this
-particular batch of goals under the mock LLM.
-
 ## Observability
 
 Every run produces `logs/<run_id>.json`, a `RunLog` (`schemas.py`) containing: goal,
