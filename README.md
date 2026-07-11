@@ -5,6 +5,8 @@ executes it in a real subprocess sandbox, judges its own results with an indepen
 monitor, and recovers from failure without a human in the loop — plus a live chat
 playground that streams the reasoning trace as it happens.
 
+![ReAct Agent](assets/ReAct_Agent.png)
+
 ```
 heva_agent/
 ├── .env                    # OPENROUTER_API_KEY / OPENROUTER_MODEL / LLM_MODE
@@ -80,10 +82,6 @@ model. `call_tool()` is the single dispatch point: it validates the proposed
 `tool_input` against the tool's input schema and *never* lets an exception escape — a
 malformed schema, a missing file, a timeout, or a crashing subprocess all come back as
 `ToolResult(success=False, error=...)` rather than crashing the agent loop.
-
-
-![ReAct Agent](assets/ReAct_Agent.png)
-
 
 ## Self-correction mechanism
 
