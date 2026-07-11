@@ -142,10 +142,9 @@ and recovery decision, in order, so the whole decision chain that produced the a
 inspectable, not just the answer itself. The sidebar links back to every past run's log
 in the same format.
 
-**Demo:** [`assets/demo.mp4`](assets/demo.mp4): watch the agent build a self-correcting
-ReAct coding agent, live, driven by the real LLM end to end. Model inference adds
-noticeable latency between steps, so **playing the video at 2x speed or faster is
-recommended.**
+**Demo:** [`demo.mp4`](https://drive.google.com/file/d/125d8uFMdlrKttRgt0HpCTQDl6Kn8mDII/view?usp=sharing)
+
+Watch the agent build another self-correcting ReAct coding agent from scratch, live, using a real LLM end-to-end. Since every step involves model inference, there is noticeable latency between actions. **Watching at 2× speed (or faster) is recommended.**
 
 ## Evaluation
 
