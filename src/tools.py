@@ -8,10 +8,25 @@ runs the tool, and *never* lets a raw exception escape: it always returns a
 ToolResult(success=False, error=...) instead, so a bad/unexpected schema or
 a crashing tool degrades gracefully rather than taking down the agent loop.
 
-One tool (`flaky_read_report`) is intentionally unreliable: it simulates a
-transient storage error on ~35% of calls. This is the "intentionally broken
-tool that fails intermittently" required by the assignment, used to prove
-the agent's tool_failure detection + retry-with-backoff recovery path.
+Two tools are intentionally unreliable, one per deterministic failure mode:
+
+  * `flaky_read_report`  - simulates a transient storage error on ~35% of
+    calls. This is the "intentionally broken tool that fails intermittently"
+    used to prove the agent's tool_failure detection + retry_with_backoff
+    recovery path (Monitor's fast-path #2).
+
+  * `run_type_check`     - ALWAYS raises ModuleNotFoundError, because the
+    type checker it shells out to is deliberately not installed in this
+    sandbox. This proves the agent's dependency_missing detection (Monitor's
+    fast-path #1, the deterministic regex) + adapt_approach recovery: the
+    agent should stop calling this tool and route around it (e.g. skip
+    type-checking, or eyeball the code instead) rather than retrying it.
+
+`incomplete_implementation` and `result_inconsistency` are deliberately NOT
+represented by a broken tool here - they aren't tool-level failures, they're
+judgments about the *content* a tool produced (a stub file, a failing test,
+empty output), so they only ever arise from the LLM judge inspecting
+CURRENT ARTIFACTS / tool output, never from a tool raising an exception.
 """
 from __future__ import annotations
 
@@ -58,6 +73,27 @@ def write_file(inp: WriteFileInput) -> WriteFileOutput:
     with open(path, "w") as f:
         f.write(inp.content)
     return WriteFileOutput(path=path, bytes_written=len(inp.content.encode("utf-8")))
+
+
+# ---------------------------------------------------------------------------
+# read_file
+# ---------------------------------------------------------------------------
+
+class ReadFileInput(BaseModel):
+    filename: str
+
+
+class ReadFileOutput(BaseModel):
+    path: str
+    content: str
+
+
+def read_file(inp: ReadFileInput) -> ReadFileOutput:
+    path = _sandbox_path(inp.filename)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"{path} does not exist")
+    with open(path) as f:
+        return ReadFileOutput(path=path, content=f.read())
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +163,7 @@ def run_tests(inp: RunTestsInput) -> RunTestsOutput:
 
 
 # ---------------------------------------------------------------------------
-# flaky_read_report  (the intentionally broken tool)
+# flaky_read_report  (intentionally broken tool #1: transient tool_failure)
 # ---------------------------------------------------------------------------
 
 class ReadReportInput(BaseModel):
@@ -149,13 +185,49 @@ def flaky_read_report(inp: ReadReportInput) -> ReadReportOutput:
 
 
 # ---------------------------------------------------------------------------
+# run_type_check  (intentionally broken tool #2: deterministic dependency_missing)
+# ---------------------------------------------------------------------------
+
+class TypeCheckInput(BaseModel):
+    filename: str
+
+
+class TypeCheckOutput(BaseModel):
+    exit_code: int
+    stdout: str
+    stderr: str
+
+
+def run_type_check(inp: TypeCheckInput) -> TypeCheckOutput:
+    """Run a static type checker (mypy) against a file.
+
+    `mypy` is deliberately NOT installed in this sandbox, so this always
+    raises ModuleNotFoundError. Unlike flaky_read_report (transient, retrying
+    eventually works), this failure is permanent - no amount of retrying
+    fixes it. It exists to exercise Monitor's deterministic dependency_missing
+    fast-path and the agent's adapt_approach recovery: the agent should stop
+    calling this tool for this goal and find another way to validate the
+    code (e.g. execute_python / run_tests) instead of retrying it.
+    """
+    path = _sandbox_path(inp.filename)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"{path} does not exist")
+    import mypy  # noqa: F401  -- intentionally not installed in this sandbox
+    raise RuntimeError("unreachable")  # pragma: no cover
+
+
+# ---------------------------------------------------------------------------
 # Registry + dispatcher
 # ---------------------------------------------------------------------------
 
 TOOL_REGISTRY: dict[str, dict] = {
     "write_file": {
         "func": write_file, "input": WriteFileInput, "output": WriteFileOutput,
-        "description": "Write source code to a file in the sandbox workspace.",
+        "description": "Write source code to a file in the sandbox workspace. OVERWRITES the whole file - always pass the complete desired content, not just a diff.",
+    },
+    "read_file": {
+        "func": read_file, "input": ReadFileInput, "output": ReadFileOutput,
+        "description": "Read back the current full content of a file already in the sandbox. Use this to verify what's on disk before extending a file with write_file.",
     },
     "execute_python": {
         "func": execute_python, "input": ExecutePythonInput, "output": ExecutePythonOutput,
@@ -170,6 +242,15 @@ TOOL_REGISTRY: dict[str, dict] = {
         "description": (
             "Read back a previously written file as a 'report'. UNRELIABLE: fails "
             "intermittently (~35% of calls) with a simulated transient storage error."
+        ),
+    },
+    "run_type_check": {
+        "func": run_type_check, "input": TypeCheckInput, "output": TypeCheckOutput,
+        "description": (
+            "Run a static type checker (mypy) against a file. NOT AVAILABLE in this "
+            "sandbox (the package isn't installed) - always fails with a missing-"
+            "dependency error. If this fails, do not retry it; use execute_python or "
+            "run_tests to validate the code instead."
         ),
     },
 }

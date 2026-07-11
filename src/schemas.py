@@ -20,20 +20,36 @@ def _now() -> datetime:
 
 # ---------------------------------------------------------------------------
 # Failure taxonomy
+#
+# Five modes, each with its own distinct recovery strategy (see monitor.py
+# for the full rationale and detection logic):
+#
+#   tool_failure               -> retry_with_backoff       (same action, same tool, again - transient failure)
+#   dependency_missing         -> adapt_approach            (route around a capability the environment doesn't have)
+#   incomplete_implementation  -> continue_implementation   (complete the stub using the current artifact as a base)
+#   result_inconsistency       -> regenerate_action         (re-derive the action w/ error context)
+#   goal_drift                 -> replan_from_memory        (rebuild remaining plan from memory)
+#
+# `dependency_missing` is detected deterministically (regex over the raw
+# tool error); the rest go through the LLM judge.
 # ---------------------------------------------------------------------------
 
 class FailureMode(str, Enum):
     NONE = "none"
-    TOOL_FAILURE = "tool_failure"                # the tool itself errored / crashed / timed out
-    RESULT_INCONSISTENCY = "result_inconsistency"  # tool "succeeded" but output contradicts the goal
-    GOAL_DRIFT = "goal_drift"                     # plan has wandered from the original goal
+    TOOL_FAILURE = "tool_failure"                           # the tool itself errored / crashed / timed out
+    DEPENDENCY_MISSING = "dependency_missing"                # missing package/binary/capability - no amount of retrying helps
+    INCOMPLETE_IMPLEMENTATION = "incomplete_implementation"  # tool "succeeded" but the artifact it wrote is a stub
+    RESULT_INCONSISTENCY = "result_inconsistency"            # tool "succeeded" but output otherwise contradicts the goal
+    GOAL_DRIFT = "goal_drift"                                # plan has wandered from the original goal
 
 
 class RecoveryStrategy(str, Enum):
-    RETRY_WITH_BACKOFF = "retry_with_backoff"     # tool_failure: same action, same tool, again
-    REGENERATE_ACTION = "regenerate_action"       # result_inconsistency: re-derive the action with error context
-    REPLAN_FROM_MEMORY = "replan_from_memory"     # goal_drift: rebuild the remaining plan from working memory
-    ABANDON_SUBTASK = "abandon_subtask"           # replanning budget exhausted
+    RETRY_WITH_BACKOFF = "retry_with_backoff"           # tool_failure: replay the IDENTICAL action, same tool, after a backoff
+    ADAPT_APPROACH = "adapt_approach"                   # dependency_missing: re-reason around the missing capability entirely
+    CONTINUE_IMPLEMENTATION = "continue_implementation"  # incomplete_implementation: finish the stub, using the current artifact as a base
+    REGENERATE_ACTION = "regenerate_action"             # result_inconsistency: re-derive the action with error context
+    REPLAN_FROM_MEMORY = "replan_from_memory"           # goal_drift: rebuild the remaining plan from working memory
+    ABANDON_SUBTASK = "abandon_subtask"                 # replanning budget exhausted, regardless of failure mode
 
 
 class StepStatus(str, Enum):
@@ -124,11 +140,24 @@ class WorkingMemory(BaseModel):
     entries: list[MemoryEntry] = Field(default_factory=list)
     completed_step_ids: list[str] = Field(default_factory=list)
     unresolved_step_ids: list[str] = Field(default_factory=list)
+    # Explicit, structured file state - the ground truth of what's actually on
+    # disk in the sandbox right now, keyed by filename. This is what lets the
+    # agent build a file *incrementally* across steps: write_file always
+    # overwrites, so the reasoner needs to see the CURRENT content before it
+    # can correctly extend it, not just a "bytes_written: N" observation. It's
+    # also what lets the JUDGE catch incomplete_implementation - it can look
+    # at the actual code, not just a success flag.
+    files: dict[str, str] = Field(default_factory=dict)
 
     def add(self, step_id: str, kind: str, content: str) -> None:
         self.entries.append(MemoryEntry(step_id=step_id, kind=kind, content=content))
 
-    def as_context_string(self, max_entries: int = 25) -> str:
+    def remember_file(self, filename: str, content: str) -> None:
+        """Record the authoritative current content of a file the agent wrote.
+        Called after every successful write_file so later steps can see it."""
+        self.files[filename] = content
+
+    def as_context_string(self, max_entries: int = 25, max_file_chars: int = 6000) -> str:
         """Rendered view of memory for injection into LLM prompts."""
         lines = [f"GOAL: {self.goal}"]
         if self.completed_step_ids:
@@ -138,6 +167,16 @@ class WorkingMemory(BaseModel):
         lines.append("MEMORY LOG (most recent last):")
         for e in self.entries[-max_entries:]:
             lines.append(f"  [{e.step_id}][{e.kind}] {e.content}")
+        if self.files:
+            lines.append("\nCURRENT FILE CONTENTS IN SANDBOX (this is what's actually on disk right "
+                          "now - write_file OVERWRITES a file, so if you are extending one of these, "
+                          "your new tool_input.content must include ALL of this plus your addition, "
+                          "not just the new part):")
+            for fname, content in self.files.items():
+                truncated = content if len(content) <= max_file_chars else (
+                    content[:max_file_chars] + f"\n... [truncated, {len(content)} chars total]"
+                )
+                lines.append(f"--- {fname} ---\n{truncated}\n--- end {fname} ---")
         return "\n".join(lines)
 
 

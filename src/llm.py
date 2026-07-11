@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import random
 import re
+import time
 from typing import Callable, Optional
 
 from .config import settings
@@ -58,11 +59,42 @@ class LiveLLMClient:
         )
         self.model = settings.openrouter_model
 
-    def chat(self, messages: list[Message], temperature: float = 0.2) -> str:
-        resp = self.client.chat.completions.create(
-            model=self.model, messages=messages, temperature=temperature,
-        )
-        return resp.choices[0].message.content or ""
+    def chat(self, messages: list[Message], temperature: float = 0.2, max_retries: int = 2) -> str:
+        last_err: Optional[Exception] = None
+        for attempt in range(max_retries + 1):
+            try:
+                resp = self.client.chat.completions.create(
+                    model=self.model, messages=messages, temperature=temperature,
+                )
+            except Exception as e:  # network blip, rate limit, etc.
+                last_err = e
+                if attempt < max_retries:
+                    time.sleep(1.5 * (attempt + 1))
+                    continue
+                raise
+
+            choice = resp.choices[0] if resp.choices else None
+            content = (choice.message.content or "").strip() if choice else ""
+            if content:
+                return content
+
+            # Some OpenRouter models (particularly free-tier / reasoning models)
+            # occasionally return an empty `content` field - either a transient
+            # blip, or the real answer landed in a separate `reasoning` field
+            # instead. Neither case is "the model gave a real, malformed
+            # answer" (that's what chat_json's repair-prompt loop is for) -
+            # this is the completion itself coming back empty, so retry the
+            # call rather than propagating an empty string downstream.
+            reasoning_field = getattr(choice.message, "reasoning", None) if choice else None
+            if reasoning_field and str(reasoning_field).strip():
+                return str(reasoning_field).strip()
+
+            last_err = ValueError("LLM returned empty content")
+            if attempt < max_retries:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+
+        raise last_err or ValueError("LLM returned empty content after retries")
 
     def chat_stream(self, messages: list[Message], on_token: StreamCallback,
                      temperature: float = 0.2) -> str:
