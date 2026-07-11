@@ -6,7 +6,7 @@ monitor, and recovers from failure without a human in the loop, plus a live chat
 playground that streams the reasoning trace as it happens.
 
 ![ReAct Agent](assets/ReAct_Agent.png)
-
+## Project Structure
 ```
 heva_agent/
 ├── .env                    # OPENROUTER_API_KEY / OPENROUTER_MODEL / LLM_MODE
