@@ -17,7 +17,7 @@ heva_agent/
 └── src/
     ├── config.py             # env validation, fails fast on bad config
     ├── schemas.py             # Pydantic models for the whole state/memory lifecycle
-    ├── llm.py                 # OpenRouter client (+ offline MockLLMClient)
+    ├── llm.py                 # OpenRouter client
     ├── tools.py                # typed tools + subprocess execution + the flaky tool
     ├── monitor.py               # independent Judge: self-eval + recovery strategy selection
     ├── agent.py                  # the ReAct state machine / main loop
