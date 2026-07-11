@@ -81,6 +81,10 @@ model. `call_tool()` is the single dispatch point: it validates the proposed
 malformed schema, a missing file, a timeout, or a crashing subprocess all come back as
 `ToolResult(success=False, error=...)` rather than crashing the agent loop.
 
+
+![ReAct Agent](ReAct Agent.png)
+
+
 ## Self-correction mechanism
 
 After every tool call, `Monitor.evaluate()` (in `monitor.py`) — a component that did
