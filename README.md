@@ -32,8 +32,8 @@ pip install -e .
 # edit .env with a real OPENROUTER_API_KEY (get one at https://openrouter.ai/keys)
 
 # 1. Chat playground (live reasoning trace in the browser)
-uvicorn src.server:app --reload
-# open http://localhost:8000
+python -m uvicorn src.server:app
+# open http://localhost:8000  (do not use --reload)
 
 # 2. CLI evaluation (10 goals x self-correct/baseline)
 python run_evaluation.py
